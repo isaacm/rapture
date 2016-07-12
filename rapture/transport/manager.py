@@ -15,8 +15,8 @@ WORKER_FUNCTIONS = {
 
 class TransportManager(object):
     """
-    The Transport Manager transfers the given files with the configured workers. It 
-    handles the threading of the workers and their success/failure. If a transfer 
+    The Transport Manager transfers the given files with the configured workers. It
+    handles the threading of the workers and their success/failure. If a transfer
     fails, it maintains a list of the failed workers and will retry only the failures.
 
     It also performs a file check on all files to ensure that the file is not being
@@ -26,10 +26,10 @@ class TransportManager(object):
     def __init__(self, error_file=None):
         self.logger = logging.getLogger(__name__)
         self.error_file = error_file
-        self.all_workers= [d for d in conf.keys() if d is not 'app']
+        self.all_workers = [d for d in conf.keys() if d is not 'app']
         self.logger.debug("TransportManager created with %s workers." % ",".join(self.all_workers))
         self.threads = []
-        self.errors = {} 
+        self.errors = {}
         # { '/path/to/file': [wroker1, worker4] }
 
     def transfer(self, file_list):

@@ -1,19 +1,19 @@
 # workers.py
 
+from datetime import datetime as dt
 import logging
 import os
 import shutil
 import threading
 import time
 
-from datetime import datetime as dt
-
-import pyrax
-pyrax.set_setting("identity_type", "rackspace")
-
 import paramiko
+from swiftly import client
+
+from rapture.util import get_checksum
 
 MAX_RETRIES = 5
+
 
 def local_move_func(settings, filename, results):
     """
@@ -39,6 +39,7 @@ def local_move_func(settings, filename, results):
         logger.error("{0} failed...".format(filename))
         results.append(name)
 
+
 def cloudfiles_func(settings, filename, results):
     """
     Uploads files to Rackspace Cloud Files.
@@ -47,24 +48,36 @@ def cloudfiles_func(settings, filename, results):
     name = threading.currentThread().getName()
     logger = logging.getLogger(__name__ + "." + name)
 
-    creds_file = settings['credential_file']
-    pyrax.set_credential_file(creds_file)
-    pyrax.set_setting('use_servicenet', settings['use_snet'])
     region = settings['region']
     container_name = settings['container_name']
     nest_by_timestamp = settings.get('nest_by_timestamp', False)
     obj_ttl = settings.get('set_ttl', None)
 
+    swiftly_client = client.standardclient.StandardClient(
+        auth_user=settings['auth_user'],
+        auth_key=settings['auth_key'],
+        auth_url=settings['auth_url'],
+        snet=settings['use_snet'],
+        region=settings['region']
+    )
+
     try:
-        cf = pyrax.connect_to_cloudfiles(region=region)
-        container = cf.get_container(container_name)
-    except:
-        logger.error("Unable to connect to cloudfiles. Transfer for {0} aborted, failing gracefully.".format(filename))
+        swiftly_client.auth()
+    except Exception as swiftly_exc:
+        logger.error(
+            "Unable to connect to cloud files with error {0}. "
+            "Transfer for {1} aborted, failing gracefully.".format(
+                swiftly_exc,
+                filename
+            )
+        )
         results.append(name)
         return
 
     if os.path.getsize(filename) >= 5368709120:
-        logger.error("{0} is too large. Files over 5GB are not currently supported.".format(filename))
+        logger.error(
+            "{0} is too large. "
+            "Files over 5GB are not currently supported.".format(filename))
         results.append(name)
         return
 
@@ -80,22 +93,45 @@ def cloudfiles_func(settings, filename, results):
                 day=d.strftime("%d"),
                 filename=obj_name)
 
-    chksum = pyrax.utils.get_checksum(filename)
-    for i in range(MAX_RETRIES):
-        try:
-            start = time.time()
-            #Used for testing the retry
-            #raise pyrax.exceptions.UploadFailed()
-            obj = container.upload_file(filename, obj_name=obj_name, etag=chksum, ttl=obj_ttl)
-            end = time.time()
-            logger.debug("%s transferred to %s in %.2f secs." % (filename, container_name, (end - start)))
-            break
-        except pyrax.exceptions.UploadFailed:
-            logger.warning("Upload to container:%s in %s failed, retry %d" % (container_name, region, i + 1))
-            time.sleep(2)
-    else:
-        logger.error("Upload to container:%s in %s failed!" % (container_name, region))
-        results.append(name)
+    with open(filename) as upload_file:
+        upload_checksum = get_checksum(upload_file)
+        for i in range(MAX_RETRIES):
+            try:
+                start = time.time()
+                headers = {"ETag": upload_checksum}
+                if obj_ttl is not None:
+                    headers["X-Delete-After"] = obj_ttl
+
+                status, reason, headers, contents = swiftly_client.put_object(
+                    container_name,
+                    obj_name,
+                    upload_file,
+                    headers=headers,
+                )
+
+                end = time.time()
+                logger.debug(
+                    'Uploaded status: {0} reason: '
+                    '{1} headers: {2} contents: {3}'.format(
+                        status, reason, headers, contents
+                    )
+                )
+                logger.debug("%s transferred to %s in %.2f secs." % (
+                    filename, container_name, (end - start)))
+                if status in (201, 202):
+                    break
+
+            except Exception as exc:
+                logger.warning(
+                    "Error {0}"
+                    "Upload to container: {1} in {2} failed, retry {3}".format(
+                        exc, container_name, region, i + 1))
+                time.sleep(2)
+        else:
+            logger.error(
+                "Upload to container:%s in %s failed!" % (container_name, region))
+            results.append(name)
+    del swiftly_client
 
 
 def scp_func(settings, filename, results):
@@ -109,7 +145,7 @@ def scp_func(settings, filename, results):
     address = settings['address']
     username = settings['username']
     port = settings.get('port', 22)
-    
+
     if 'destination' in settings.keys():
         destination = settings['destination']
     else:
@@ -143,7 +179,7 @@ def scp_func(settings, filename, results):
             start = time.time()
             sftp.put(filename, os.path.basename(filename))
             end = time.time()
-            logger.debug("Tranfer completed in %.2f secs" % (end - start))
+            logger.debug("Transfer completed in %.2f secs" % (end - start))
             break
         except Exception as e:
             logger.warning("Upload to server:%s failed, retry %d" % (address, i + 1))
@@ -151,3 +187,5 @@ def scp_func(settings, filename, results):
     else:
         logger.error("Upload to server:%s failed!" % (address))
         results.append(name)
+
+    s.close()

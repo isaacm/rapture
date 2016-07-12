@@ -1,5 +1,6 @@
 import gnupg
 import gzip
+import hashlib
 import logging
 import os
 import sys
@@ -25,11 +26,21 @@ def validate_config(config_file):
         section = 'app'
         settings[section] = {}
         settings[section]['watch_dir'] = parser.get(section, 'watch_dir')
-        settings[section]['scan_interval'] = parser.getint(section, 'scan_interval')
+        settings[section]['scan_interval'] = parser.getint(
+            section,
+            'scan_interval'
+        )
         settings[section]['log_level'] = parser.get(section, 'log_level')
         settings[section]['error_file'] = parser.get(section, 'error_file')
-        settings[section]['enable_decryption'] = parser.getboolean(section, 'enable_decryption') 
-        settings[section]['enable_compression'] = parser.getboolean(section, 'enable_compression')
+        settings[section]['enable_decryption'] = parser.getboolean(
+            section,
+            'enable_decryption'
+        )
+        settings[section]['enable_compression'] = parser.getboolean(
+            section,
+            'enable_compression'
+        )
+        settings[section]['batch_size'] = parser.getint(section, 'batch_size')
 
         if parser.has_option(section, 'gpghome'):
             settings[section]['gpghome'] = parser.get(section, 'gpghome')
@@ -42,10 +53,13 @@ def validate_config(config_file):
         try:
             settings[section] = {}
             settings[section]['type'] = parser.get(section, 'type')
-            settings[section]['credential_file'] = parser.get(section, 'credential_file')
             settings[section]['container_name'] = parser.get(section, 'container_name')
             settings[section]['region'] = parser.get(section, 'region')
             settings[section]['use_snet'] = parser.getboolean(section, 'use_snet')
+            settings[section]['auth_user'] = parser.get(section, 'auth_user')
+            settings[section]['auth_key'] = parser.get(section, 'auth_key')
+            settings[section]['auth_url'] = parser.get(section, 'auth_url')
+
             if parser.has_option(section, 'nest_by_timestamp'):
                 settings[section]['nest_by_timestamp'] = parser.getboolean(section, 'nest_by_timestamp')
             if parser.has_option(section, 'set_ttl'):
@@ -111,7 +125,7 @@ def setup_logging(log_level=logging.INFO):
 
 def decrypt_file(encrypted_file, gpghome=None):
     '''
-    Decrypts the file using the gpg keys found at gpghome. 
+    Decrypts the file using the gpg keys found at gpghome.
     Returns True if successful decryption, else False
     '''
     gpghome = gpghome or os.path.join(os.getenv('HOME'), '.gnupg')
@@ -128,27 +142,27 @@ def ready_check(file_list, delay=10):
     Performs a check against the given files to ensure they are not actively being
     written.
     """
-    
+
     if not file_list:
         return []
     ready_files = []
     tmp = {}
-    
+
     def get_last_byte(filename):
         with open(filename, 'rb') as f:
             f.seek(0, 2)
             return f.tell()
-    
+
     for filename in file_list:
         tmp[filename] = get_last_byte(filename)
-    
+
     time.sleep(delay)
-    
+
     for filename in file_list:
         last_byte = get_last_byte(filename)
         if tmp[filename] == get_last_byte(filename):
             ready_files.append(filename)
-    
+
     return sorted(ready_files)
 
 def compress_file(filename, method='gzip'):
@@ -167,3 +181,51 @@ def compress_file(filename, method='gzip'):
     if success:
         os.remove(filename)
     return compressed_filename
+
+
+def get_checksum(content, encoding="utf8", block_size=8192):
+    """
+    Taken from `pyrax.utils`.
+
+    Returns the MD5 checksum in hex for the given content. If 'content'
+    is a file-like object, the content will be obtained from its read()
+    method. If 'content' is a file path, that file is read and its
+    contents used. Otherwise, 'content' is assumed to be the string whose
+    checksum is desired. If the content is unicode, it will be encoded
+    using the specified encoding.
+
+    To conserve memory, files and file-like objects will be read in blocks,
+    with the default block size of 8192 bytes, which is 64 * the digest block
+    size of md5 (128). This is optimal for most cases, but you can change this
+    by passing in a different value for `block_size`.
+    """
+    md = hashlib.md5()
+
+    def safe_update(text):
+        try:
+            md.update(text)
+        except UnicodeEncodeError:
+            md.update(text.encode(encoding))
+
+    try:
+        isfile = os.path.isfile(content)
+    except TypeError:
+        # Will happen with binary content.
+        isfile = False
+    if isfile:
+        with open(content, "rb") as ff:
+            txt = ff.read(block_size)
+            while txt:
+                safe_update(txt)
+                txt = ff.read(block_size)
+    elif hasattr(content, "read"):
+        pos = content.tell()
+        content.seek(0)
+        txt = content.read(block_size)
+        while txt:
+            safe_update(txt)
+            txt = content.read(block_size)
+        content.seek(pos)
+    else:
+        safe_update(content)
+    return md.hexdigest()

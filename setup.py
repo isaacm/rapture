@@ -3,8 +3,8 @@ import sys
 
 from setuptools import setup, find_packages
 
-REQUIRES = ['pyrax', 'paramiko', 'python-gnupg']
-            
+REQUIRES = ['paramiko', 'python-gnupg', 'requests', 'swiftly']
+
 setup(
     name='rapture',
     version='0.2.1',

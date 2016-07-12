@@ -5,7 +5,8 @@ import sys
 import time
 
 from rapture import conf
-from rapture.util import *
+from rapture.util import setup_logging, \
+    compress_file, ready_check, decrypt_file
 from rapture.transport.manager import TransportManager
 
 from requests.packages import urllib3
@@ -16,15 +17,34 @@ info = logging.getLogger('rapture').info
 warning = logging.getLogger('rapture').warning
 error = logging.getLogger('rapture').error
 
+
 def scan(watch_dir):
     debug("Scanning for files.")
-    return [os.path.join(watch_dir, f) for f in os.listdir(watch_dir)
-            if os.path.isfile(os.path.join(watch_dir, f))
-            and not f.startswith('.')]
+    batch_size = conf['app']['batch_size']
+
+    found_files = [
+        os.path.join(watch_dir, f) for f in os.listdir(watch_dir)
+        if os.path.isfile(os.path.join(watch_dir, f)) and not
+        f.startswith('.')
+    ]
+
+    # process the oldest files first
+    found_files.sort(
+        key=lambda found_f: os.path.getmtime(os.path.join(watch_dir, found_f)))
+
+    debug("Found {0} files in total.".format(len(found_files)))
+    found_files = (
+        found_files[:batch_size]
+        if 0 < batch_size < len(found_files) else found_files
+    )
+    debug("Processing the oldest {0} files ...".format(len(found_files)))
+    return found_files
+
 
 def shutdown(signum, frame):
     info("Shutting down...")
     sys.exit(0)
+
 
 def run():
     signal.signal(signal.SIGTERM, shutdown)
@@ -39,7 +59,7 @@ def run():
     info('Starting Rapture, watching %s' % watch_dir)
     for setting, value in conf['app'].items():
         debug("{0}:\t{1}".format(setting, value))
-    
+
     tm = TransportManager(error_file)
 
     while True:
