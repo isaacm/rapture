@@ -1,10 +1,11 @@
 import json
 import logging
+import os
 import threading
-import time
 
 from rapture import conf
-from rapture.transport.workers import *
+from rapture.transport.workers import cloudfiles_func, \
+    scp_func, local_move_func
 
 # Worker/function map
 WORKER_FUNCTIONS = {
@@ -12,6 +13,7 @@ WORKER_FUNCTIONS = {
         'scp': scp_func,
         'local': local_move_func,
     }
+
 
 class TransportManager(object):
     """
@@ -30,7 +32,7 @@ class TransportManager(object):
         self.logger.debug("TransportManager created with %s workers." % ",".join(self.all_workers))
         self.threads = []
         self.errors = {}
-        # { '/path/to/file': [wroker1, worker4] }
+        # { '/path/to/file': [worker1, worker4] }
 
     def transfer(self, file_list):
         """

@@ -153,7 +153,7 @@ def scp_func(settings, filename, results):
 
     if 'password' in settings.keys():
         password = settings['password']
-        ssh_key  = None
+        ssh_key = None
     else:
         ssh_key = settings['ssh_key']
         password = None
@@ -170,22 +170,41 @@ def scp_func(settings, filename, results):
                 sftp.mkdir(destination)
                 sftp.chdir(destination)
     except Exception as e:
-        logger.error("Unable to connect via SCP. Transfer for {0} aborted, failing gracefully.".format(filename))
+        logger.error(
+            "Error {0}. Unable to connect via SCP. "
+            "Transfer for {1} aborted, failing gracefully.".format(
+                e, filename))
         results.append(name)
         return
+
+    def progress(bytes_sent, total_bytes):
+        if bytes_sent % (32768 * 100) == 0 or bytes_sent == total_bytes:
+            logger.debug(
+                "scp file transfer {0} is {1}% complete.".format(
+                    os.path.basename(filename),
+                    ((float(bytes_sent)/total_bytes) * 100),
+                )
+            )
 
     for i in range(MAX_RETRIES):
         try:
             start = time.time()
-            sftp.put(filename, os.path.basename(filename))
+            sftp.put(
+                filename,
+                os.path.basename(filename),
+                callback=progress
+            )
             end = time.time()
             logger.debug("Transfer completed in %.2f secs" % (end - start))
             break
         except Exception as e:
-            logger.warning("Upload to server:%s failed, retry %d" % (address, i + 1))
+            logger.warning(
+                "Error {0}. Upload to server:{1} failed, retry {2}".format(
+                    e, address, i + 1)
+            )
             time.sleep(2)
     else:
-        logger.error("Upload to server:%s failed!" % (address))
+        logger.error("Upload to server:{0} failed!".format(address))
         results.append(name)
 
     s.close()
