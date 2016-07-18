@@ -54,12 +54,15 @@ class TransportManager(object):
     def execute(self, filename, workers):
         results = []
         for d in workers:
-            worker = threading.Thread(
-                    name=d,
-                    target=WORKER_FUNCTIONS.get(conf[d]['type']),
-                    args=(conf[d], filename, results))
-            worker.start()
-            self.threads.append(worker)
+            # check if the section is enabled in the configuration
+            # add worker only if the config file section is active
+            if conf.get(d) is not None:
+                worker = threading.Thread(
+                        name=d,
+                        target=WORKER_FUNCTIONS.get(conf[d]['type']),
+                        args=(conf[d], filename, results))
+                worker.start()
+                self.threads.append(worker)
 
         for t in self.threads:
             t.join()
